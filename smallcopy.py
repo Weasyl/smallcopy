@@ -307,7 +307,7 @@ def copy_siteupdate(cur):
 def copy_tag_updates(cur):
 	cur.execute(
 		"INSERT INTO smallcopy.tag_updates (updateid, submitid, userid, added, removed, updated_at) "
-		"SELECT updateid, submitid, tag_updates.userid, added, removed, updated_at FROM tag_updates INNER JOIN smallcopy.submission USING (submitid)")
+		"SELECT updateid, submitid, tag_updates.userid, added, removed, updated_at FROM tag_updates INNER JOIN smallcopy.submission USING (submitid) INNER JOIN smallcopy.login ON tag_updates.userid = login.userid")
 
 @step("user_links")
 def copy_user_links(cur):
