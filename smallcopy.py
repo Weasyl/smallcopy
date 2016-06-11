@@ -42,6 +42,10 @@ def schema_init(cur):
 	cur.execute(schema_init_sql)
 	cur.execute("SET search_path = public")
 
+@step("alembic_version")
+def copy_alembic_version(cur):
+	cur.execute("INSERT INTO smallcopy.alembic_version SELECT * FROM alembic_version")
+
 @step("login")
 def copy_login(cur):
 	cur.execute(
@@ -175,17 +179,34 @@ def drop_composition(cur):
 def copy_cron_runs(cur):
 	cur.execute("INSERT INTO smallcopy.cron_runs (last_run) SELECT last_run FROM cron_runs")
 
+@step("journal")
+def copy_journal(cur):
+	cur.execute("""
+		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
+		SELECT journalid, userid, title, rating, unixtime, settings, page_views
+		FROM journal
+		WHERE
+			userid = ANY (%(staff)s) AND
+			rating <= 20 AND
+			settings !~ '[hf]'
+	""", {"staff": staff})
+
 @step("favorite")
 def copy_favorite(cur):
 	cur.execute("""
 		INSERT INTO smallcopy.favorite (userid, targetid, type, unixtime, settings)
-		SELECT userid, targetid, type, favorite.unixtime, favorite.settings
+		SELECT favorite.userid, targetid, type, favorite.unixtime, favorite.settings
 		FROM favorite
-			INNER JOIN profile USING (userid)
-		WHERE
-			userid = ANY (%(staff)s) AND
-			profile.config !~ '[hv]'
-	""", {"staff": staff})
+			INNER JOIN smallcopy.login fu ON favorite.userid = fu.userid
+			INNER JOIN profile ON favorite.userid = profile.userid
+			LEFT JOIN smallcopy.submission ON favorite.type = 's' AND favorite.targetid = submission.submitid
+			LEFT JOIN smallcopy.character ON favorite.type = 'f' AND favorite.targetid = character.charid
+			LEFT JOIN smallcopy.journal ON favorite.type = 'j' AND favorite.targetid = journal.journalid
+		WHERE profile.config !~ '[hv]' AND (
+			submitid IS NOT NULL OR
+			charid IS NOT NULL OR
+			journalid IS NOT NULL)
+	""")
 
 @step("frienduser")
 def copy_frienduser(cur):
@@ -210,18 +231,6 @@ def copy_google_doc_embeds(cur):
 @step("drop ignorecontent")
 def drop_ignorecontent(cur):
 	cur.execute("DROP TABLE smallcopy.ignorecontent")
-
-@step("journal")
-def copy_journal(cur):
-	cur.execute("""
-		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
-		SELECT journalid, userid, title, rating, unixtime, settings, page_views
-		FROM journal
-		WHERE
-			userid = ANY (%(staff)s) AND
-			rating <= 20 AND
-			settings !~ '[hf]'
-	""", {"staff": staff})
 
 @step("journalcomment")
 def copy_journalcomment(cur):
@@ -408,6 +417,40 @@ def copy_media(cur):
 			FROM media_media_links
 				INNER JOIN t ON describee_id = t.mediaid
 	""")
+
+@step("update sequences")
+def update_sequences(cur):
+	sequences = [
+		("ads", "id"),
+		("character", "charid"),
+		("charcomment", "commentid"),
+		("comments", "commentid"),
+		("commishclass", "classid"),
+		("commishprice", "priceid"),
+		("folder", "folderid"),
+		("journal", "journalid"),
+		("journalcomment", "commentid"),
+		("login", "userid"),
+		("media_media_links", "linkid"),
+		("media", "mediaid"),
+		("message", "noteid"),
+		("oauth_bearer_tokens", "id"),
+		("report", "reportid"),
+		("reportcomment", "commentid"),
+		("searchtag", "tagid"),
+		("siteupdate", "updateid"),
+		("submission_media_links", "linkid"),
+		("submission", "submitid"),
+		("tag_updates", "updateid"),
+		("user_links", "linkid"),
+		("user_media_links", "linkid"),
+		("welcome", "welcomeid"),
+	]
+
+	for table, column in sequences:
+		cur.execute(
+			"SELECT setval(pg_get_serial_sequence('{table}', '{column}'), COALESCE((SELECT max({column}) + 1 FROM {table}), 1), false)"
+			.format(table="smallcopy." + table, column=column))
 
 max_name_length = max(len(name) for name, func in steps)
 time_format_string = "\x1b[u\x1b[32m✓\x1b[0m {:%d} \x1b[2m{:6.2f}s\x1b[0m" % (max_name_length,)
