@@ -1,0 +1,9 @@
+--- schema.sql
++++ schema.sql
+@@ -16,0 +16,3 @@
++DROP SCHEMA IF EXISTS smallcopy CASCADE;
++CREATE SCHEMA smallcopy;
++
+@@ -45,1 +48,1 @@
+-SET search_path = public, pg_catalog;
++SET search_path = smallcopy, public, pg_catalog;
