@@ -167,14 +167,6 @@ def copy_commishprice(cur):
 		"INSERT INTO smallcopy.commishprice (priceid, classid, userid, title, amount_min, amount_max, settings) "
 		"SELECT priceid, classid, userid, title, amount_min, amount_max, commishprice.settings FROM commishprice INNER JOIN smallcopy.login USING (userid)")
 
-@step("drop commission")
-def drop_commission(cur):
-	cur.execute("DROP TABLE smallcopy.commission")
-
-@step("drop composition")
-def drop_composition(cur):
-	cur.execute("DROP TABLE smallcopy.composition")
-
 @step("cron_runs")
 def copy_cron_runs(cur):
 	cur.execute("INSERT INTO smallcopy.cron_runs (last_run) SELECT last_run FROM cron_runs")
@@ -228,10 +220,6 @@ def copy_google_doc_embeds(cur):
 			settings !~ '[hf]'
 	""", {"staff": staff})
 
-@step("drop ignorecontent")
-def drop_ignorecontent(cur):
-	cur.execute("DROP TABLE smallcopy.ignorecontent")
-
 @step("journalcomment")
 def copy_journalcomment(cur):
 	cur.execute("""
@@ -256,16 +244,6 @@ def copy_journalcomment(cur):
 		)
 			SELECT * FROM t
 	""", {"staff": staff})
-
-"""
-@step("drop loginaddress")
-def drop_loginaddress(cur):
-	cur.execute("DROP TABLE smallcopy.loginaddress")
-"""
-
-@step("drop logininvite")
-def drop_logininvite(cur):
-	cur.execute("DROP TABLE smallcopy.logininvite")
 
 @step("profile")
 def copy_profile(cur):
