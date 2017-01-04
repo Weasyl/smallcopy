@@ -247,10 +247,16 @@ def copy_journalcomment(cur):
 
 @step("profile")
 def copy_profile(cur):
-	cur.execute(
-		"INSERT INTO smallcopy.profile (userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text) "
-		"SELECT userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text FROM profile WHERE userid = ANY (%(staff)s)",
-		{"staff": staff})
+	cur.execute("""
+		INSERT INTO smallcopy.profile (userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text)
+		SELECT
+			userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings,
+			stream_url, page_views,
+			regexp_replace(config, '[map]|^(?=[^map]*$)', ('{"",m,a,p}'::text[])[('x' || md5(username))::bit(8)::integer %% 4 + 1]),
+			jsonb_settings, stream_time, stream_text
+		FROM profile
+		WHERE userid = ANY (%(staff)s)
+	""", {"staff": staff})
 
 @step("searchtag")
 def copy_searchtag(cur):
