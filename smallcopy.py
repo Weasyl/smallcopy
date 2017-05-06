@@ -1,34 +1,10 @@
+import json
 import psycopg2
 import sys
 import time
 
-db = psycopg2.connect(database="weasyl", user="weasyl")
-
-staff = [
-	5,      # taw
-	1014,   # fiz
-	1019,   # aden
-	2008,   # tiger
-	2061,   # ikani
-	2252,   # suburbanfox
-	2402,   # skylerbunny
-	2872,   # syfaro
-	4339,   # karuno
-	5173,   # keet
-	5756,   # weykent
-	15224,  # foximile
-	15712,  # levi
-	20418,  # novacaine
-	23613,  # hendikins
-	26707,  # kyra
-	34165,  # charmander
-	38623,  # 8bitfur
-]
-
-with open("schema.sql", "r") as f:
-	schema_init_sql = f.read()
-
 steps = []
+
 
 def step(name):
 	def wrapper(func):
@@ -36,30 +12,38 @@ def step(name):
 
 	return wrapper
 
+
 @step("initialize schema")
-def schema_init(cur):
+def schema_init(cur, **config):
+	with open("schema.sql", "r") as f:
+		schema_init_sql = f.read()
+
 	cur.execute(schema_init_sql)
 	cur.execute("SET search_path = public")
 
+
 @step("alembic_version")
-def copy_alembic_version(cur):
+def copy_alembic_version(cur, **config):
 	cur.execute("INSERT INTO smallcopy.alembic_version SELECT * FROM alembic_version")
 
+
 @step("login")
-def copy_login(cur):
+def copy_login(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.login (userid, login_name, last_login, settings, email) "
 		"SELECT userid, login_name, 0, settings, login_name || '@weasyl.com' FROM login WHERE userid = ANY (%(staff)s)",
 		{"staff": staff})
 
+
 @step("authbcrypt")
-def copy_authbcrypt(cur):
+def copy_authbcrypt(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.authbcrypt (userid, hashsum) "
 		"SELECT userid, '$2a$12$qReI924/8pAsoHu6aRTX2ejyujAZ/9FiOOtrjczBIwf8wqXAJ22N.' FROM authbcrypt INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("character")
-def copy_character(cur):
+def copy_character(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.character (charid, userid, unixtime, char_name, age, gender, height, weight, species, content, rating, settings, page_views)
 		SELECT charid, userid, unixtime, char_name, age, gender, height, weight, species, content, rating, character.settings, page_views
@@ -70,8 +54,9 @@ def copy_character(cur):
 			character.settings !~ '[hf]'
 	""")
 
+
 @step("charcomment")
-def copy_charcomment(cur):
+def copy_charcomment(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.charcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
@@ -92,22 +77,25 @@ def copy_charcomment(cur):
 			SELECT * FROM t
 	""")
 
+
 @step("folder")
-def copy_folder(cur):
+def copy_folder(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.folder (folderid, parentid, userid, title, settings) "
 		"SELECT folderid, parentid, userid, title, folder.settings FROM folder INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("submission")
-def copy_submission(cur):
+def copy_submission(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.submission (submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count) "
 		"SELECT submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count FROM submission "
 		"WHERE userid = ANY (%(staff)s) AND rating <= 20 AND settings !~ '[hf]'",
 		{"staff": staff})
 
+
 @step("collection")
-def copy_collection(cur):
+def copy_collection(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.collection (userid, submitid, unixtime, settings)
 		SELECT collection.userid, submitid, collection.unixtime, collection.settings
@@ -120,8 +108,9 @@ def copy_collection(cur):
 			submission.settings !~ '[hf]'
 	""", {"staff": staff})
 
+
 @step("comments")
-def copy_comments(cur):
+def copy_comments(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.comments (commentid, userid, target_user, target_sub, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
@@ -148,30 +137,35 @@ def copy_comments(cur):
 			SELECT * FROM t
 	""", {"staff": staff})
 
+
 @step("commishclass")
-def copy_commishclass(cur):
+def copy_commishclass(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishclass (classid, userid, title) "
 		"SELECT classid, userid, title FROM commishclass INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("commishdesc")
-def copy_commishdesc(cur):
+def copy_commishdesc(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishdesc (userid, content) "
 		"SELECT userid, content FROM commishdesc INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("commishprice")
-def copy_commishprice(cur):
+def copy_commishprice(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishprice (priceid, classid, userid, title, amount_min, amount_max, settings) "
 		"SELECT priceid, classid, userid, title, amount_min, amount_max, commishprice.settings FROM commishprice INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("cron_runs")
-def copy_cron_runs(cur):
+def copy_cron_runs(cur, **config):
 	cur.execute("INSERT INTO smallcopy.cron_runs (last_run) SELECT last_run FROM cron_runs")
 
+
 @step("journal")
-def copy_journal(cur):
+def copy_journal(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
 		SELECT journalid, userid, title, rating, unixtime, settings, page_views
@@ -182,8 +176,9 @@ def copy_journal(cur):
 			settings !~ '[hf]'
 	""", {"staff": staff})
 
+
 @step("favorite")
-def copy_favorite(cur):
+def copy_favorite(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.favorite (userid, targetid, type, unixtime, settings)
 		SELECT favorite.userid, targetid, type, favorite.unixtime, favorite.settings
@@ -199,15 +194,17 @@ def copy_favorite(cur):
 			journalid IS NOT NULL)
 	""")
 
+
 @step("frienduser")
-def copy_frienduser(cur):
+def copy_frienduser(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.frienduser (userid, otherid, settings, unixtime) "
 		"SELECT userid, otherid, settings, unixtime FROM frienduser WHERE userid = ANY (%(staff)s) AND otherid = ANY (%(staff)s) AND position('p' in settings) = 0",
 		{"staff": staff})
 
+
 @step("google_doc_embeds")
-def copy_google_doc_embeds(cur):
+def copy_google_doc_embeds(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.google_doc_embeds (submitid, embed_url)
 		SELECT submitid, embed_url
@@ -219,8 +216,9 @@ def copy_google_doc_embeds(cur):
 			settings !~ '[hf]'
 	""", {"staff": staff})
 
+
 @step("journalcomment")
-def copy_journalcomment(cur):
+def copy_journalcomment(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journalcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
@@ -244,8 +242,9 @@ def copy_journalcomment(cur):
 			SELECT * FROM t
 	""", {"staff": staff})
 
+
 @step("profile")
-def copy_profile(cur):
+def copy_profile(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.profile (userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text)
 		SELECT
@@ -257,8 +256,9 @@ def copy_profile(cur):
 		WHERE userid = ANY (%(staff)s)
 	""", {"staff": staff})
 
+
 @step("searchtag")
-def copy_searchtag(cur):
+def copy_searchtag(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.searchtag (tagid, title)
 		SELECT tagid, title
@@ -270,81 +270,94 @@ def copy_searchtag(cur):
 			INNER JOIN searchtag USING (tagid)
 	""")
 
+
 @step("searchmapchar")
-def copy_searchmapchar(cur):
+def copy_searchmapchar(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapchar (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapchar.settings FROM searchmapchar INNER JOIN smallcopy.character ON targetid = charid")
 
+
 @step("searchmapjournal")
-def copy_searchmapjournal(cur):
+def copy_searchmapjournal(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapjournal (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapjournal.settings FROM searchmapjournal INNER JOIN smallcopy.journal ON targetid = journalid")
 
+
 @step("searchmapsubmit")
-def copy_searchmapsubmit(cur):
+def copy_searchmapsubmit(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapsubmit (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapsubmit.settings FROM searchmapsubmit INNER JOIN smallcopy.submission ON targetid = submitid")
 
+
 @step("siteupdate")
-def copy_siteupdate(cur):
+def copy_siteupdate(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.siteupdate (updateid, userid, title, content, unixtime) "
 		"SELECT updateid, userid, title, content, unixtime FROM siteupdate WHERE userid = ANY (%(staff)s)",
 		{"staff": staff})
 
+
 @step("tag_updates")
-def copy_tag_updates(cur):
+def copy_tag_updates(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.tag_updates (updateid, submitid, userid, added, removed, updated_at) "
 		"SELECT updateid, submitid, tag_updates.userid, added, removed, updated_at FROM tag_updates INNER JOIN smallcopy.submission USING (submitid) INNER JOIN smallcopy.login ON tag_updates.userid = login.userid")
 
+
 @step("user_links")
-def copy_user_links(cur):
+def copy_user_links(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_links (linkid, userid, link_type, link_value) "
 		"SELECT linkid, userid, link_type, link_value FROM user_links INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("user_streams")
-def copy_user_streams(cur):
+def copy_user_streams(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_streams (userid, start_time, end_time) "
 		"SELECT userid, start_time, end_time FROM user_streams INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("user_timezones")
-def copy_user_timezones(cur):
+def copy_user_timezones(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_timezones (userid, timezone) "
 		"SELECT userid, timezone FROM user_timezones INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("useralias")
-def copy_useralias(cur):
+def copy_useralias(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.useralias (userid, alias_name, settings) "
 		"SELECT userid, alias_name, useralias.settings FROM useralias INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("userinfo")
-def copy_userinfo(cur):
+def copy_userinfo(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userinfo (userid, birthday, gender, country) "
 		"SELECT userid, 0, gender, country FROM userinfo INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("userpremium")
-def copy_userpremium(cur):
+def copy_userpremium(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userpremium (userid, unixtime, terms) "
 		"SELECT userid, unixtime, terms FROM userpremium INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("userstats")
-def copy_userstats(cur):
+def copy_userstats(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userstats (userid, page_views, submit_views, followers, faved_works, journals, submits, characters, collects, faves) "
 		"SELECT userid, page_views, submit_views, followers, faved_works, journals, submits, characters, collects, faves FROM userstats INNER JOIN smallcopy.login USING (userid)")
 
+
 @step("watchuser")
-def copy_watchuser(cur):
+def copy_watchuser(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.watchuser (userid, otherid, settings, unixtime)
 		SELECT watchuser.userid, otherid, watchuser.settings, unixtime
@@ -353,8 +366,9 @@ def copy_watchuser(cur):
 			INNER JOIN smallcopy.login o ON otherid = o.userid
 	""")
 
+
 @step("add necessary media entries")
-def copy_media(cur):
+def copy_media(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.media (mediaid, media_type, file_type, attributes, sha256)
 		WITH RECURSIVE t AS (
@@ -401,8 +415,9 @@ def copy_media(cur):
 				INNER JOIN t ON describee_id = t.mediaid
 	""")
 
+
 @step("update sequences")
-def update_sequences(cur):
+def update_sequences(cur, **config):
 	sequences = [
 		("ads", "id"),
 		("character", "charid"),
@@ -435,26 +450,31 @@ def update_sequences(cur):
 			"SELECT setval(pg_get_serial_sequence('{table}', '{column}'), COALESCE((SELECT max({column}) + 1 FROM {table}), 1), false)"
 			.format(table="smallcopy." + table, column=column))
 
-max_name_length = max(len(name) for name, func in steps)
-time_format_string = "\x1b[u\x1b[32m✓\x1b[0m {:%d} \x1b[2m{:6.2f}s\x1b[0m" % (max_name_length,)
-overall_start = time.perf_counter()
 
-with db:
-	cur = db.cursor()
+def main(config):
+	max_name_length = max(len(name) for name, func in steps)
+	time_format_string = "\x1b[u\x1b[32m✓\x1b[0m {:%d} \x1b[2m{:6.2f}s\x1b[0m" % (max_name_length,)
+	overall_start = time.perf_counter()
 
-	for name, func in steps:
-		print("\x1b[s… " + name, end="", file=sys.stderr, flush=True)
+	with psycopg2.connect(**config["database"]) as db, db.cursor() as cur:
+		for name, func in steps:
+			print("\x1b[s… " + name, end="", file=sys.stderr, flush=True)
 
-		step_start = time.perf_counter()
-		func(cur)
-		step_time = time.perf_counter() - step_start
+			step_start = time.perf_counter()
+			func(cur, **config)
+			step_time = time.perf_counter() - step_start
 
-		print(time_format_string.format(name, step_time), file=sys.stderr, flush=True)
+			print(time_format_string.format(name, step_time), file=sys.stderr, flush=True)
 
-	cur.close()
+	db.close()
 
-db.close()
+	overall_time = time.perf_counter() - overall_start
+	print(" " * (max_name_length + 3) + "───────")
+	print(" " * (max_name_length + 3) + "{:6.2f}s".format(overall_time))
 
-overall_time = time.perf_counter() - overall_start
-print(" " * (max_name_length + 3) + "───────")
-print(" " * (max_name_length + 3) + "{:6.2f}s".format(overall_time))
+
+if __name__ == "__main__":
+	with open("config.json", "r") as f:
+		config = json.load(f)
+
+	main(config)
