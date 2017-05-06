@@ -5,25 +5,24 @@ import time
 db = psycopg2.connect(database="weasyl", user="weasyl")
 
 staff = [
-	3,
-	5,
-	1014,
-	1019,
-	2008,
-	2011,
-	2061,
-	2252,
-	2402,
-	5173,
-	5756,
-	15224,
-	15712,
-	20418,
-	23613,
-	34165,
-	38623,
-	61554,
-	89199,
+	5,      # taw
+	1014,   # fiz
+	1019,   # aden
+	2008,   # tiger
+	2061,   # ikani
+	2252,   # suburbanfox
+	2402,   # skylerbunny
+	2872,   # syfaro
+	4339,   # karuno
+	5173,   # keet
+	5756,   # weykent
+	15224,  # foximile
+	15712,  # levi
+	20418,  # novacaine
+	23613,  # hendikins
+	26707,  # kyra
+	34165,  # charmander
+	38623,  # 8bitfur
 ]
 
 with open("schema.sql", "r") as f:
