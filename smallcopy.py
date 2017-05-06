@@ -445,6 +445,20 @@ def update_sequences(cur, **config):
 		("welcome", "welcomeid"),
 	]
 
+	cur.execute("SELECT 'smallcopy.' || sequence_name FROM information_schema.sequences WHERE sequence_schema = 'smallcopy'")
+	database_sequences = frozenset(name for name, in cur)
+
+	cur.execute(
+		"SELECT pg_get_serial_sequence('smallcopy.' || table_name::text, column_name::text) "
+		"FROM UNNEST (%(sequences)s) AS t (table_name unknown, column_name unknown)",
+		{'sequences': sequences},
+	)
+	updating_sequences = frozenset(name for name, in cur)
+
+	if not database_sequences <= updating_sequences:
+		missing = sorted(database_sequences - updating_sequences)
+		raise RuntimeError(f"Sequences missing update: {missing!r}")
+
 	for table, column in sequences:
 		cur.execute(
 			"SELECT setval(pg_get_serial_sequence('{table}', '{column}'), COALESCE((SELECT max({column}) + 1 FROM {table}), 1), false)"
