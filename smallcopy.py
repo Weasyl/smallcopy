@@ -292,6 +292,13 @@ def copy_searchmapsubmit(cur, **config):
 		"SELECT tagid, targetid, searchmapsubmit.settings FROM searchmapsubmit INNER JOIN smallcopy.submission ON targetid = submitid")
 
 
+@step("submission_tags")
+def copy_submission_tags(cur, **config):
+	cur.execute(
+		"INSERT INTO smallcopy.submission_tags (submitid, tags) "
+		"SELECT submitid, tags FROM submission_tags INNER JOIN smallcopy.submission USING (submitid)")
+
+
 @step("siteupdate")
 def copy_siteupdate(cur, *, staff, **config):
 	cur.execute(
@@ -425,6 +432,7 @@ def update_sequences(cur, **config):
 		("comments", "commentid"),
 		("commishclass", "classid"),
 		("commishprice", "priceid"),
+		("emailblacklist", "id"),
 		("folder", "folderid"),
 		("journal", "journalid"),
 		("journalcomment", "commentid"),
