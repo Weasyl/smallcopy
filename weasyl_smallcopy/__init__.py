@@ -2,12 +2,48 @@ import psycopg2
 import sys
 import time
 
+ignore_tables = [
+	"ads",
+	"api_tokens",
+	"artist_optout_tags",
+	"artist_preferred_tags",
+	"blocktag",
+	"emailblacklist",
+	"emailverify",
+	"forgotpassword",
+	"globally_restricted_tags",
+	"ignoreuser",
+	"logincreate",
+	"message",
+	"oauth_bearer_tokens",
+	"oauth_consumers",
+	"permaban",
+	"premiumpurchase",
+	"report",
+	"reportcomment",
+	"sessions",
+	"suspension",
+	"twofa_recovery_codes",
+	"user_restricted_tags",
+	"views",
+	"welcome",
+	"welcomecount",
+]
+
+_defined_steps = set()
+step_tables = set(ignore_tables)
 steps = []
 
 
-def step(name):
+def step(name, *, dependencies=frozenset(), tables=frozenset()):
 	def wrapper(func):
+		for dependency in dependencies:
+			if dependency not in _defined_steps:
+				raise ValueError(f"Step {name!r} must run after its dependency {dependency!r}")
+
 		steps.append((name, func))
+		_defined_steps.add(name)
+		step_tables.update(tables)
 
 	return wrapper
 
@@ -21,12 +57,22 @@ def schema_init(cur, **config):
 	cur.execute("SET search_path = public")
 
 
-@step("alembic_version")
+@step("check tables")
+def check_tables(cur, **config):
+	cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'smallcopy'")
+	database_tables = frozenset(name for name, in cur)
+
+	if not database_tables <= step_tables:
+		missing = sorted(database_tables - step_tables)
+		raise RuntimeError(f"Tables missing step: {missing!r}")
+
+
+@step("alembic_version", tables=["alembic_version"])
 def copy_alembic_version(cur, **config):
 	cur.execute("INSERT INTO smallcopy.alembic_version SELECT * FROM alembic_version")
 
 
-@step("login")
+@step("login", tables=["login"])
 def copy_login(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.login (userid, login_name, last_login, settings, email) "
@@ -34,14 +80,14 @@ def copy_login(cur, *, staff, **config):
 		{"staff": staff})
 
 
-@step("authbcrypt")
+@step("authbcrypt", dependencies=["login"], tables=["authbcrypt"])
 def copy_authbcrypt(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.authbcrypt (userid, hashsum) "
 		"SELECT userid, '$2a$12$qReI924/8pAsoHu6aRTX2ejyujAZ/9FiOOtrjczBIwf8wqXAJ22N.' FROM authbcrypt INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("character")
+@step("character", dependencies=["login"], tables=["character"])
 def copy_character(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.character (charid, userid, unixtime, char_name, age, gender, height, weight, species, content, rating, settings, page_views)
@@ -54,7 +100,7 @@ def copy_character(cur, **config):
 	""")
 
 
-@step("charcomment")
+@step("charcomment", dependencies=["character", "login"], tables=["charcomment"])
 def copy_charcomment(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.charcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
@@ -77,14 +123,14 @@ def copy_charcomment(cur, **config):
 	""")
 
 
-@step("folder")
+@step("folder", dependencies=["login"], tables=["folder"])
 def copy_folder(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.folder (folderid, parentid, userid, title, settings) "
 		"SELECT folderid, parentid, userid, title, folder.settings FROM folder INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("submission")
+@step("submission", dependencies=["login"], tables=["submission"])
 def copy_submission(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.submission (submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count) "
@@ -93,7 +139,7 @@ def copy_submission(cur, *, staff, **config):
 		{"staff": staff})
 
 
-@step("collection")
+@step("collection", dependencies=["login", "submission"], tables=["collection"])
 def copy_collection(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.collection (userid, submitid, unixtime, settings)
@@ -108,7 +154,7 @@ def copy_collection(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("comments")
+@step("comments", dependencies=["login", "submission"], tables=["comments"])
 def copy_comments(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.comments (commentid, userid, target_user, target_sub, parentid, content, unixtime, indent, settings, hidden_by)
@@ -137,33 +183,33 @@ def copy_comments(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("commishclass")
+@step("commishclass", dependencies=["login"], tables=["commishclass"])
 def copy_commishclass(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishclass (classid, userid, title) "
 		"SELECT classid, userid, title FROM commishclass INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("commishdesc")
+@step("commishdesc", dependencies=["login"], tables=["commishdesc"])
 def copy_commishdesc(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishdesc (userid, content) "
 		"SELECT userid, content FROM commishdesc INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("commishprice")
+@step("commishprice", dependencies=["commishclass", "login"], tables=["commishprice"])
 def copy_commishprice(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.commishprice (priceid, classid, userid, title, amount_min, amount_max, settings) "
 		"SELECT priceid, classid, userid, title, amount_min, amount_max, commishprice.settings FROM commishprice INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("cron_runs")
+@step("cron_runs", tables=["cron_runs"])
 def copy_cron_runs(cur, **config):
 	cur.execute("INSERT INTO smallcopy.cron_runs (last_run) SELECT last_run FROM cron_runs")
 
 
-@step("journal")
+@step("journal", dependencies=["login"], tables=["journal"])
 def copy_journal(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
@@ -176,7 +222,7 @@ def copy_journal(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("favorite")
+@step("favorite", dependencies=["character", "journal", "login", "submission"], tables=["favorite"])
 def copy_favorite(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.favorite (userid, targetid, type, unixtime, settings)
@@ -194,7 +240,7 @@ def copy_favorite(cur, **config):
 	""")
 
 
-@step("frienduser")
+@step("frienduser", dependencies=["login"], tables=["frienduser"])
 def copy_frienduser(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.frienduser (userid, otherid, settings, unixtime) "
@@ -202,7 +248,7 @@ def copy_frienduser(cur, *, staff, **config):
 		{"staff": staff})
 
 
-@step("google_doc_embeds")
+@step("google_doc_embeds", dependencies=["submission"], tables=["google_doc_embeds"])
 def copy_google_doc_embeds(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.google_doc_embeds (submitid, embed_url)
@@ -216,7 +262,7 @@ def copy_google_doc_embeds(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("journalcomment")
+@step("journalcomment", dependencies=["journal", "login"], tables=["journalcomment"])
 def copy_journalcomment(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journalcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
@@ -242,7 +288,7 @@ def copy_journalcomment(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("profile")
+@step("profile", dependencies=["login"], tables=["profile"])
 def copy_profile(cur, *, staff, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.profile (userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text)
@@ -256,7 +302,7 @@ def copy_profile(cur, *, staff, **config):
 	""", {"staff": staff})
 
 
-@step("searchtag")
+@step("searchtag", tables=["searchtag"])
 def copy_searchtag(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.searchtag (tagid, title)
@@ -270,35 +316,35 @@ def copy_searchtag(cur, **config):
 	""")
 
 
-@step("searchmapchar")
+@step("searchmapchar", dependencies=["character", "searchtag"], tables=["searchmapchar"])
 def copy_searchmapchar(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapchar (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapchar.settings FROM searchmapchar INNER JOIN smallcopy.character ON targetid = charid")
 
 
-@step("searchmapjournal")
+@step("searchmapjournal", dependencies=["journal", "searchtag"], tables=["searchmapjournal"])
 def copy_searchmapjournal(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapjournal (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapjournal.settings FROM searchmapjournal INNER JOIN smallcopy.journal ON targetid = journalid")
 
 
-@step("searchmapsubmit")
+@step("searchmapsubmit", dependencies=["searchtag", "submission"], tables=["searchmapsubmit"])
 def copy_searchmapsubmit(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.searchmapsubmit (tagid, targetid, settings) "
 		"SELECT tagid, targetid, searchmapsubmit.settings FROM searchmapsubmit INNER JOIN smallcopy.submission ON targetid = submitid")
 
 
-@step("submission_tags")
+@step("submission_tags", dependencies=["searchtag", "submission"], tables=["submission_tags"])
 def copy_submission_tags(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.submission_tags (submitid, tags) "
 		"SELECT submitid, tags FROM submission_tags INNER JOIN smallcopy.submission USING (submitid)")
 
 
-@step("siteupdate")
+@step("siteupdate", dependencies=["login"], tables=["siteupdate"])
 def copy_siteupdate(cur, *, staff, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.siteupdate (updateid, userid, title, content, unixtime) "
@@ -306,63 +352,63 @@ def copy_siteupdate(cur, *, staff, **config):
 		{"staff": staff})
 
 
-@step("tag_updates")
+@step("tag_updates", dependencies=["login", "submission"], tables=["tag_updates"])
 def copy_tag_updates(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.tag_updates (updateid, submitid, userid, added, removed, updated_at) "
 		"SELECT updateid, submitid, tag_updates.userid, added, removed, updated_at FROM tag_updates INNER JOIN smallcopy.submission USING (submitid) INNER JOIN smallcopy.login ON tag_updates.userid = login.userid")
 
 
-@step("user_links")
+@step("user_links", dependencies=["login"], tables=["user_links"])
 def copy_user_links(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_links (linkid, userid, link_type, link_value) "
 		"SELECT linkid, userid, link_type, link_value FROM user_links INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("user_streams")
+@step("user_streams", dependencies=["login"], tables=["user_streams"])
 def copy_user_streams(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_streams (userid, start_time, end_time) "
 		"SELECT userid, start_time, end_time FROM user_streams INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("user_timezones")
+@step("user_timezones", dependencies=["login"], tables=["user_timezones"])
 def copy_user_timezones(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.user_timezones (userid, timezone) "
 		"SELECT userid, timezone FROM user_timezones INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("useralias")
+@step("useralias", dependencies=["login"], tables=["useralias"])
 def copy_useralias(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.useralias (userid, alias_name, settings) "
 		"SELECT userid, alias_name, useralias.settings FROM useralias INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("userinfo")
+@step("userinfo", dependencies=["login"], tables=["userinfo"])
 def copy_userinfo(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userinfo (userid, birthday, gender, country) "
 		"SELECT userid, 0, gender, country FROM userinfo INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("userpremium")
+@step("userpremium", dependencies=["login"], tables=["userpremium"])
 def copy_userpremium(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userpremium (userid, unixtime, terms) "
 		"SELECT userid, unixtime, terms FROM userpremium INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("userstats")
+@step("userstats", dependencies=["login"], tables=["userstats"])
 def copy_userstats(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.userstats (userid, page_views, submit_views, followers, faved_works, journals, submits, characters, collects, faves) "
 		"SELECT userid, page_views, submit_views, followers, faved_works, journals, submits, characters, collects, faves FROM userstats INNER JOIN smallcopy.login USING (userid)")
 
 
-@step("watchuser")
+@step("watchuser", dependencies=["login"], tables=["watchuser"])
 def copy_watchuser(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.watchuser (userid, otherid, settings, unixtime)
@@ -373,7 +419,11 @@ def copy_watchuser(cur, **config):
 	""")
 
 
-@step("add necessary media entries")
+@step(
+	"add necessary media entries",
+	dependencies=["login", "submission"],
+	tables=["disk_media", "media", "media_media_links", "submission_media_links", "user_media_links"],
+)
 def copy_media(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.media (mediaid, media_type, file_type, attributes, sha256)
@@ -422,7 +472,25 @@ def copy_media(cur, **config):
 	""")
 
 
-@step("update sequences")
+@step(
+	"update sequences",
+	dependencies=[
+		"character",
+		"charcomment",
+		"comments",
+		"commishclass",
+		"commishprice",
+		"folder",
+		"journal",
+		"journalcomment",
+		"login",
+		"add necessary media entries",
+		"searchtag",
+		"siteupdate",
+		"submission",
+		"tag_updates",
+	],
+)
 def update_sequences(cur, **config):
 	sequences = [
 		("ads", "id"),
