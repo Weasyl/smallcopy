@@ -1,4 +1,3 @@
-import json
 import psycopg2
 import sys
 import time
@@ -493,10 +492,3 @@ def main(config):
 	overall_time = time.perf_counter() - overall_start
 	print(" " * (max_name_length + 3) + "───────")
 	print(" " * (max_name_length + 3) + "{:6.2f}s".format(overall_time))
-
-
-if __name__ == "__main__":
-	with open("config.json", "r") as f:
-		config = json.load(f)
-
-	main(config)
