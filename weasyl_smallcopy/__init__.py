@@ -2,6 +2,15 @@ import psycopg2
 import sys
 import time
 
+INCLUDE_ALL = "all"
+
+RATING_CODES = {
+	"general": 10,
+	"moderate": 20,
+	"mature": 30,
+	"explicit": 40,
+}
+
 ignore_tables = [
 	"ads",
 	"api_tokens",
@@ -73,11 +82,13 @@ def copy_alembic_version(cur, **config):
 
 
 @step("login", tables=["login"])
-def copy_login(cur, *, staff, **config):
+def copy_login(cur, *, include, **config):
+	id_filter = "" if include == INCLUDE_ALL else "WHERE userid = ANY (%(include)s)"
+
 	cur.execute(
 		"INSERT INTO smallcopy.login (userid, login_name, last_login, settings, email) "
-		"SELECT userid, login_name, 0, settings, login_name || '@weasyl.com' FROM login WHERE userid = ANY (%(staff)s)",
-		{"staff": staff})
+		"SELECT userid, login_name, 0, settings, login_name || '@weasyl.com' FROM login " + id_filter,
+		{"include": include})
 
 
 @step("authbcrypt", dependencies=["login"], tables=["authbcrypt"])
@@ -88,16 +99,16 @@ def copy_authbcrypt(cur, **config):
 
 
 @step("character", dependencies=["login"], tables=["character"])
-def copy_character(cur, **config):
+def copy_character(cur, *, max_rating, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.character (charid, userid, unixtime, char_name, age, gender, height, weight, species, content, rating, settings, page_views)
 		SELECT charid, userid, unixtime, char_name, age, gender, height, weight, species, content, rating, character.settings, page_views
 		FROM character
 			INNER JOIN smallcopy.login USING (userid)
 		WHERE
-			rating <= 20 AND
+			rating <= %(max_rating)s AND
 			character.settings !~ '[hf]'
-	""")
+	""", {"max_rating": max_rating})
 
 
 @step("charcomment", dependencies=["character", "login"], tables=["charcomment"])
@@ -131,56 +142,49 @@ def copy_folder(cur, **config):
 
 
 @step("submission", dependencies=["login"], tables=["submission"])
-def copy_submission(cur, *, staff, **config):
-	cur.execute(
-		"INSERT INTO smallcopy.submission (submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count) "
-		"SELECT submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count FROM submission "
-		"WHERE userid = ANY (%(staff)s) AND rating <= 20 AND settings !~ '[hf]'",
-		{"staff": staff})
+def copy_submission(cur, *, max_rating, **config):
+	cur.execute("""
+		INSERT INTO smallcopy.submission (submitid, folderid, userid, unixtime, title, content, subtype, rating, settings, page_views, sorttime, fave_count)
+		SELECT submitid, folderid, userid, unixtime, title, content, subtype, rating, submission.settings, page_views, sorttime, fave_count
+		FROM submission
+			INNER JOIN smallcopy.login USING (userid)
+		WHERE rating <= %(max_rating)s AND submission.settings !~ '[hf]'
+	""", {"max_rating": max_rating})
 
 
 @step("collection", dependencies=["login", "submission"], tables=["collection"])
-def copy_collection(cur, *, staff, **config):
+def copy_collection(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.collection (userid, submitid, unixtime, settings)
 		SELECT collection.userid, submitid, collection.unixtime, collection.settings
 		FROM collection
-			INNER JOIN submission USING (submitid)
-		WHERE
-			collection.userid = ANY (%(staff)s) AND
-			submission.userid = ANY (%(staff)s) AND
-			submission.rating <= 20 AND
-			submission.settings !~ '[hf]'
-	""", {"staff": staff})
+			INNER JOIN smallcopy.submission USING (submitid)
+			INNER JOIN smallcopy.login cu ON collection.userid = cu.userid
+	""")
 
 
 @step("comments", dependencies=["login", "submission"], tables=["comments"])
-def copy_comments(cur, *, staff, **config):
+def copy_comments(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.comments (commentid, userid, target_user, target_sub, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
 			SELECT commentid, comments.userid, target_user, target_sub, parentid, comments.content, comments.unixtime, indent, comments.settings, hidden_by
 			FROM comments
-				LEFT JOIN submission ON target_sub = submitid
-				LEFT JOIN login ON target_user = login.userid
+				INNER JOIN smallcopy.login co ON comments.userid = co.userid
+				LEFT JOIN smallcopy.submission ON target_sub = submitid
+				LEFT JOIN smallcopy.login ct ON target_user = ct.userid
 			WHERE
-				comments.userid = ANY (%(staff)s) AND
-				(submission.userid IS NULL OR (
-					submission.userid = ANY (%(staff)s) AND
-					submission.rating <= 20 AND
-					submission.settings !~ '[hf]')) AND
-				(login.userid IS NULL OR login.userid = ANY (%(staff)s)) AND
+				(submitid IS NOT NULL OR ct.userid IS NOT NULL) AND
 				parentid IS NULL AND
 				comments.settings !~ '[hs]'
 			UNION SELECT comments.commentid, comments.userid, comments.target_user, comments.target_sub, comments.parentid, comments.content, comments.unixtime, comments.indent, comments.settings, comments.hidden_by
 			FROM comments
 				INNER JOIN t ON comments.parentid = t.commentid
-			WHERE
-				comments.userid = ANY (%(staff)s) AND
-				comments.settings !~ '[hs]'
+				INNER JOIN smallcopy.login co ON comments.userid = co.userid
+			WHERE comments.settings !~ '[hs]'
 		)
 			SELECT * FROM t
-	""", {"staff": staff})
+	""")
 
 
 @step("commishclass", dependencies=["login"], tables=["commishclass"])
@@ -210,16 +214,16 @@ def copy_cron_runs(cur, **config):
 
 
 @step("journal", dependencies=["login"], tables=["journal"])
-def copy_journal(cur, *, staff, **config):
+def copy_journal(cur, *, max_rating, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
-		SELECT journalid, userid, title, rating, unixtime, settings, page_views
+		SELECT journalid, userid, title, rating, unixtime, journal.settings, page_views
 		FROM journal
+			INNER JOIN smallcopy.login USING (userid)
 		WHERE
-			userid = ANY (%(staff)s) AND
-			rating <= 20 AND
-			settings !~ '[hf]'
-	""", {"staff": staff})
+			rating <= %(max_rating)s AND
+			journal.settings !~ '[hf]'
+	""", {"max_rating": max_rating})
 
 
 @step("favorite", dependencies=["character", "journal", "login", "submission"], tables=["favorite"])
@@ -241,65 +245,61 @@ def copy_favorite(cur, **config):
 
 
 @step("frienduser", dependencies=["login"], tables=["frienduser"])
-def copy_frienduser(cur, *, staff, **config):
-	cur.execute(
-		"INSERT INTO smallcopy.frienduser (userid, otherid, settings, unixtime) "
-		"SELECT userid, otherid, settings, unixtime FROM frienduser WHERE userid = ANY (%(staff)s) AND otherid = ANY (%(staff)s) AND position('p' in settings) = 0",
-		{"staff": staff})
+def copy_frienduser(cur, **config):
+	cur.execute("""
+		INSERT INTO smallcopy.frienduser (userid, otherid, settings, unixtime)
+		SELECT frienduser.userid, otherid, frienduser.settings, unixtime
+		FROM frienduser
+			INNER JOIN smallcopy.login fu ON frienduser.userid = fu.userid
+			INNER JOIN smallcopy.login fo ON frienduser.otherid = fo.userid
+		WHERE position('p' in frienduser.settings) = 0
+	""")
 
 
 @step("google_doc_embeds", dependencies=["submission"], tables=["google_doc_embeds"])
-def copy_google_doc_embeds(cur, *, staff, **config):
+def copy_google_doc_embeds(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.google_doc_embeds (submitid, embed_url)
 		SELECT submitid, embed_url
 		FROM google_doc_embeds
-			INNER JOIN submission USING (submitid)
-		WHERE
-			userid = ANY (%(staff)s) AND
-			rating <= 20 AND
-			settings !~ '[hf]'
-	""", {"staff": staff})
+			INNER JOIN smallcopy.submission USING (submitid)
+	""")
 
 
 @step("journalcomment", dependencies=["journal", "login"], tables=["journalcomment"])
-def copy_journalcomment(cur, *, staff, **config):
+def copy_journalcomment(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journalcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
 			SELECT commentid, journalcomment.userid, targetid, parentid, content, journalcomment.unixtime, indent, journalcomment.settings, hidden_by
 			FROM journalcomment
-				INNER JOIN journal ON targetid = journalid
+				INNER JOIN smallcopy.journal ON targetid = journalid
+				INNER JOIN smallcopy.login jcu ON journalcomment.userid = jcu.userid
 			WHERE
-				journalcomment.userid = ANY (%(staff)s) AND
-				journal.userid = ANY (%(staff)s) AND
-				journal.rating <= 20 AND
-				journal.settings !~ '[hf]' AND
 				parentid = 0 AND
 				position('h' in journalcomment.settings) = 0
 			UNION SELECT journalcomment.commentid, journalcomment.userid, journalcomment.targetid, journalcomment.parentid, journalcomment.content, journalcomment.unixtime, journalcomment.indent, journalcomment.settings, journalcomment.hidden_by
 			FROM journalcomment
 				INNER JOIN t ON journalcomment.parentid = t.commentid
-			WHERE
-				journalcomment.userid = ANY (%(staff)s) AND
-				position('h' in journalcomment.settings) = 0
+				INNER JOIN smallcopy.login jcu ON journalcomment.userid = jcu.userid
+			WHERE position('h' in journalcomment.settings) = 0
 		)
 			SELECT * FROM t
-	""", {"staff": staff})
+	""")
 
 
 @step("profile", dependencies=["login"], tables=["profile"])
-def copy_profile(cur, *, staff, **config):
+def copy_profile(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.profile (userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings, stream_url, page_views, config, jsonb_settings, stream_time, stream_text)
 		SELECT
-			userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, settings,
+			userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, profile.settings,
 			stream_url, page_views,
-			regexp_replace(config, '[map]|^(?=[^map]*$)', ('{"",m,a,p}'::text[])[('x' || md5(username))::bit(8)::integer %% 4 + 1]),
+			regexp_replace(config, '[map]|^(?=[^map]*$)', ('{"",m,a,p}'::text[])[('x' || md5(username))::bit(8)::integer % 4 + 1]),
 			jsonb_settings, stream_time, stream_text
 		FROM profile
-		WHERE userid = ANY (%(staff)s)
-	""", {"staff": staff})
+			INNER JOIN smallcopy.login USING (userid)
+	""")
 
 
 @step("searchtag", tables=["searchtag"])
@@ -345,11 +345,10 @@ def copy_submission_tags(cur, **config):
 
 
 @step("siteupdate", dependencies=["login"], tables=["siteupdate"])
-def copy_siteupdate(cur, *, staff, **config):
+def copy_siteupdate(cur, **config):
 	cur.execute(
 		"INSERT INTO smallcopy.siteupdate (updateid, userid, title, content, unixtime) "
-		"SELECT updateid, userid, title, content, unixtime FROM siteupdate WHERE userid = ANY (%(staff)s)",
-		{"staff": staff})
+		"SELECT updateid, userid, title, content, unixtime FROM siteupdate INNER JOIN smallcopy.login USING (userid)")
 
 
 @step("tag_updates", dependencies=["login", "submission"], tables=["tag_updates"])
@@ -544,13 +543,17 @@ def main(config):
 	max_name_length = max(len(name) for name, func in steps)
 	time_format_string = "\x1b[u\x1b[32m✓\x1b[0m {:%d} \x1b[2m{:6.2f}s\x1b[0m" % (max_name_length,)
 	overall_start = time.perf_counter()
+	step_config = {
+		"include": config["include"],
+		"max_rating": RATING_CODES[config["maximum_rating"]],
+	}
 
 	with psycopg2.connect(**config["database"]) as db, db.cursor() as cur:
 		for name, func in steps:
 			print("\x1b[s… " + name, end="", file=sys.stderr, flush=True)
 
 			step_start = time.perf_counter()
-			func(cur, **config)
+			func(cur, **step_config)
 			step_time = time.perf_counter() - step_start
 
 			print(time_format_string.format(name, step_time), file=sys.stderr, flush=True)
