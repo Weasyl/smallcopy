@@ -48,7 +48,7 @@ def step(name, *, dependencies=frozenset(), tables=frozenset()):
 	def wrapper(func):
 		for dependency in dependencies:
 			if dependency not in _defined_steps:
-				raise ValueError(f"Step {name!r} must run after its dependency {dependency!r}")
+				raise ValueError("Step {!r} must run after its dependency {!r}".format(name, dependency))
 
 		steps.append((name, func))
 		_defined_steps.add(name)
@@ -73,7 +73,7 @@ def check_tables(cur, **config):
 
 	if not database_tables <= step_tables:
 		missing = sorted(database_tables - step_tables)
-		raise RuntimeError(f"Tables missing step: {missing!r}")
+		raise RuntimeError("Tables missing step: {!r}".format(missing))
 
 
 @step("alembic_version", tables=["alembic_version"])
@@ -531,7 +531,7 @@ def update_sequences(cur, **config):
 
 	if not database_sequences <= updating_sequences:
 		missing = sorted(database_sequences - updating_sequences)
-		raise RuntimeError(f"Sequences missing update: {missing!r}")
+		raise RuntimeError("Sequences missing update: {!r}".format(missing))
 
 	for table, column in sequences:
 		cur.execute(
