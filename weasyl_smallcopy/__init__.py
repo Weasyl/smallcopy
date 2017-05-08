@@ -87,7 +87,7 @@ def copy_login(cur, *, include, **config):
 
 	cur.execute(
 		"INSERT INTO smallcopy.login (userid, login_name, last_login, settings, email) "
-		"SELECT userid, login_name, 0, settings, login_name || '@weasyl.com' FROM login " + id_filter,
+		"SELECT userid, login_name, 0, regexp_replace(settings, '[^d]', ''), login_name || '@weasyl.com' FROM login " + id_filter,
 		{"include": include})
 
 
