@@ -3,7 +3,7 @@
 		"user": "weasyl",
 		"dbname": "weasyl"
 	},
-	"maximum_rating": "moderate",
+	"maximum_rating": "general",
 	"include": [
 		5,
 		1014,

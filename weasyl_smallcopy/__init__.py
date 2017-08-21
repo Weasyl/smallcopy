@@ -6,7 +6,6 @@ INCLUDE_ALL = "all"
 
 RATING_CODES = {
 	"general": 10,
-	"moderate": 20,
 	"mature": 30,
 	"explicit": 40,
 }
