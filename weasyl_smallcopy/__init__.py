@@ -215,8 +215,8 @@ def copy_cron_runs(cur, **config):
 @step("journal", dependencies=["login"], tables=["journal"])
 def copy_journal(cur, *, max_rating, **config):
 	cur.execute("""
-		INSERT INTO smallcopy.journal (journalid, userid, title, rating, unixtime, settings, page_views)
-		SELECT journalid, userid, title, rating, unixtime, journal.settings, page_views
+		INSERT INTO smallcopy.journal (journalid, userid, title, content, rating, unixtime, settings, page_views)
+		SELECT journalid, userid, title, content, rating, unixtime, journal.settings, page_views
 		FROM journal
 			INNER JOIN smallcopy.login USING (userid)
 		WHERE
@@ -270,7 +270,7 @@ def copy_journalcomment(cur, **config):
 	cur.execute("""
 		INSERT INTO smallcopy.journalcomment (commentid, userid, targetid, parentid, content, unixtime, indent, settings, hidden_by)
 		WITH RECURSIVE t AS (
-			SELECT commentid, journalcomment.userid, targetid, parentid, content, journalcomment.unixtime, indent, journalcomment.settings, hidden_by
+			SELECT commentid, journalcomment.userid, targetid, parentid, journalcomment.content, journalcomment.unixtime, indent, journalcomment.settings, hidden_by
 			FROM journalcomment
 				INNER JOIN smallcopy.journal ON targetid = journalid
 				INNER JOIN smallcopy.login jcu ON journalcomment.userid = jcu.userid
