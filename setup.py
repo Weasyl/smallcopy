@@ -14,6 +14,6 @@ setup(
 		"weasyl_smallcopy",
 	],
 	install_requires=[
-		"psycopg2==2.7.1",
+		"psycopg2==2.7.3.1",
 	],
 )

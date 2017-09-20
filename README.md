@@ -18,7 +18,6 @@ Configuration is read from a `config.json` in the working directory. Its options
     The maximum rating of content to export. One of:
 
      - `general`
-     - `moderate`
      - `mature`
      - `explicit`
 
