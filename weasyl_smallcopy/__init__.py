@@ -437,14 +437,14 @@ def copy_media(cur, **config):
 	""")
 
 	cur.execute("""
-		INSERT INTO smallcopy.submission_media_links (linkid, mediaid, submitid, link_type, attributes)
-		SELECT linkid, mediaid, submitid, link_type, attributes FROM submission_media_links
+		INSERT INTO smallcopy.submission_media_links (linkid, mediaid, submitid, link_type)
+		SELECT linkid, mediaid, submitid, link_type FROM submission_media_links
 			INNER JOIN smallcopy.submission USING (submitid)
 	""")
 
 	cur.execute("""
-		INSERT INTO smallcopy.user_media_links (linkid, mediaid, userid, link_type, attributes)
-		SELECT linkid, mediaid, userid, link_type, attributes FROM user_media_links
+		INSERT INTO smallcopy.user_media_links (linkid, mediaid, userid, link_type)
+		SELECT linkid, mediaid, userid, link_type FROM user_media_links
 			INNER JOIN smallcopy.login USING (userid)
 	""")
 
@@ -455,7 +455,7 @@ def copy_media(cur, **config):
 	""")
 
 	cur.execute("""
-		INSERT INTO smallcopy.media_media_links (linkid, described_with_id, describee_id, link_type, attributes)
+		INSERT INTO smallcopy.media_media_links (linkid, described_with_id, describee_id, link_type)
 		WITH RECURSIVE t AS (
 			SELECT mediaid FROM submission_media_links
 				INNER JOIN smallcopy.submission USING (submitid)
@@ -464,7 +464,7 @@ def copy_media(cur, **config):
 			UNION SELECT described_with_id FROM media_media_links
 				INNER JOIN t ON describee_id = mediaid
 		)
-			SELECT linkid, described_with_id, describee_id, link_type, attributes
+			SELECT linkid, described_with_id, describee_id, link_type
 			FROM media_media_links
 				INNER JOIN t ON describee_id = t.mediaid
 	""")
