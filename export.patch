@@ -1,0 +1,9 @@
+--- export.sql
++++ export.sql
+@@ -20,5 +20,1 @@
+-
+-CREATE SCHEMA smallcopy;
+-
+-
+-SET search_path = smallcopy, pg_catalog;
++SET search_path = public, pg_catalog;
