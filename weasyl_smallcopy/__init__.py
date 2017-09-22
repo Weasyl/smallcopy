@@ -294,7 +294,7 @@ def copy_profile(cur, **config):
 		SELECT
 			userid, username, full_name, catchphrase, artist_type, unixtime, profile_text, profile.settings,
 			stream_url, page_views,
-			regexp_replace(config, '[map]|^(?=[^map]*$)', ('{"",m,a,p}'::text[])[('x' || md5(username))::bit(8)::integer % 4 + 1]),
+			regexp_replace(config, '[ap]|^(?=[^ap]*$)', ('{"",a,p}'::text[])[('x' || md5(username))::bit(8)::integer % 3 + 1]),
 			jsonb_settings, stream_time, stream_text
 		FROM profile
 			INNER JOIN smallcopy.login USING (userid)
